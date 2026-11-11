@@ -10,6 +10,7 @@ const updater = require('../src/update');
 const hook = require('../src/hook');
 const { createServer, snapshot } = require('../src/server');
 const external = require('../src/external');
+const report = require('../src/report');
 const pkg = require('../package.json');
 const EXTERNAL_DIRS = external.location();
 
@@ -25,6 +26,8 @@ Options:
   --no-open         Don't open the browser
   --private         Hide prompts, replies and titles; show status only
   --json            Print one snapshot as JSON and exit
+  --report          Print a Markdown report of the last 7 days per project and exit
+  --days <n>        Days the report covers, today included (default 7)
   --demo            Show a made-up team instead of your sessions
   --stop            Stop a running dashboard
   --update          Update to the latest version (git pull) and restart a running dashboard
@@ -57,7 +60,7 @@ For multiple local instances, WMAD_MAGPIE_SOURCES is a JSON array
 of {url, key} objects, used instead of the single-source variables.`;
 
 function parseArgs(argv) {
-  const o = { port: 4545, hours: 24, open: true, privacy: false, json: false, demo: false, stop: false, scenes: false, scene: null, removeScene: null, update: false };
+  const o = { port: 4545, hours: 24, open: true, privacy: false, json: false, demo: false, stop: false, scenes: false, scene: null, removeScene: null, update: false, report: false, days: 7 };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '-h' || a === '--help') { console.log(HELP); process.exit(0); }
@@ -74,6 +77,9 @@ function parseArgs(argv) {
     else if (a === '--no-open') o.open = false;
     else if (a === '--private') o.privacy = true;
     else if (a === '--json') o.json = true;
+    else if (a === '--report') o.report = true;
+    else if (a === '--days') o.days = Number(argv[++i]);
+    else if (a.startsWith('--days=')) o.days = Number(a.slice(7));
     else if (a === '--demo') o.demo = true;
     else if (a === '--stop') o.stop = true;
     else if (a === '--update') o.update = true;
@@ -87,6 +93,7 @@ function parseArgs(argv) {
     else { console.error(`Unknown option: ${a}\n\n${HELP}`); process.exit(1); }
   }
   if (!Number.isFinite(o.port) || !Number.isFinite(o.hours)) { console.error(HELP); process.exit(1); }
+  if (!Number.isInteger(o.days) || o.days < 1) { console.error('--days needs a whole number of 1 or more'); process.exit(1); }
   return o;
 }
 
@@ -204,6 +211,19 @@ async function main() {
     for (let p = o.port; p <= o.port + 10; p++) if (await alreadyRunning(p)) ports.push(p);
     for (const p of ports) await stopAt(p);
     console.log(ports.length ? `Stopped ${ports.map((p) => `http://localhost:${p}`).join(', ')}` : 'Not running.');
+    return;
+  }
+
+  if (o.report) {
+    // Logs touched since the first day's midnight, each read whole.
+    const now = Date.now();
+    const hours = (now - report.since(o.days, now)) / 3600000;
+    const w = new Watcher({ hours, ompDir: o.ompDir, full: true });
+    w.tick();
+    w.lastScan = 0;
+    w.tick();
+    const r = report.build(w.sessions(), { days: o.days, now, privacy: o.privacy });
+    console.log(o.json ? JSON.stringify(r, null, 2) : report.markdown(r));
     return;
   }
 

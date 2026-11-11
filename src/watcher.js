@@ -228,10 +228,12 @@ function sameOMPPath(s, a, b) {
 }
 
 class Watcher extends EventEmitter {
-  constructor({ hours = 24, interval = 1000, ompDir, magpieSources = process.env.WMAD_MAGPIE_SOURCES,
+  constructor({ hours = 24, interval = 1000, ompDir, full = false, magpieSources = process.env.WMAD_MAGPIE_SOURCES,
     magpieUrl = process.env.WMAD_MAGPIE_URL, magpieKey = process.env.WMAD_MAGPIE_KEY } = {}) {
     super();
     this.windowMs = hours * 3600 * 1000;
+    // --report reads every log whole: counts need the middle of big logs too.
+    this.full = full;
     this.interval = interval;
     this.trackers = new Map(); // file -> { session, offset, partial, apply }
     this.failed = new Map();   // file -> retry-after time, for logs we couldn't read
@@ -511,6 +513,12 @@ class Watcher extends EventEmitter {
       }
     } else if (st.size <= HEAD_BYTES + TAIL_BYTES) {
       this.feed(t, readRange(c.file, 0, st.size), false);
+    } else if (this.full) {
+      // A chunk boundary can split a UTF-8 character; the decoder carries it over.
+      const decoder = t.decoder || new StringDecoder('utf8');
+      for (let start = 0; start < st.size; start += TAIL_BYTES) {
+        this.feed(t, readRange(c.file, start, Math.min(start + TAIL_BYTES, st.size), decoder), false);
+      }
     } else {
       // Big log: head for metadata (cwd, title, model), tail for current state.
       this.feed(t, readRange(c.file, 0, HEAD_BYTES), true);

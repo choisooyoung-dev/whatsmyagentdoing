@@ -13,7 +13,7 @@ const source = fs.readFileSync(watcherPath, 'utf8');
 const HOUR = 3600000;
 const NOW = Date.parse('2026-10-26T10:00:00Z');
 
-function fixture(t, hours = 24) {
+function fixture(t, hours = 24, options = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wmad-watcher-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   let now = NOW;
@@ -35,7 +35,7 @@ function fixture(t, hours = 24) {
     module: mod, Buffer, Date: Clock, process: { env: {} }, setInterval, clearInterval,
     require: name => name === 'os' ? { homedir: () => root } : name === 'fs' ? io : localRequire(name),
   }, { filename: watcherPath });
-  const watcher = new mod.exports.Watcher({ hours });
+  const watcher = new mod.exports.Watcher({ hours, ...options });
   const event = (type, at, extra = {}) => JSON.stringify({ timestamp: new Date(at).toISOString(), type: 'event_msg', payload: { type, ...extra } }) + '\n';
   const write = (day, n, at) => {
     const id = `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -170,3 +170,32 @@ test('resumed Claude copies of one conversation show as a single session', t => 
   f.watcher.tick();
   assert.deepEqual(Array.from(f.watcher.sessions(), s => s.id).sort(), ['newest-copy', 'other-chat']);
 });
+
+test('full mode reads a big log whole, keeping UTF-8 characters split across chunks', t => {
+  const f = fixture(t, 24, { full: true });
+  const log = f.write('2025/01/01', 1, NOW - HOUR);
+  const CHUNK = 768 * 1024;
+  const at = NOW - HOUR;
+  // 190 turns of ASCII filler, then a Korean prompt that straddles the first
+  // chunk boundary mid-character, then more turns after it.
+  const filler = event('task_started', at, { note: 'x'.repeat(4000) });
+  fs.appendFileSync(log.file, filler.repeat(190));
+  const prompt = '가'.repeat(60);
+  const msg = event('user_message', at, { message: prompt });
+  const into = Buffer.byteLength(msg.slice(0, msg.indexOf('가'))) + 31; // 31 bytes = inside the 11th character
+  const gap = CHUNK - fs.statSync(log.file).size - into;
+  assert.ok(gap > 200, 'room for the padding line');
+  const pad = event('pad', at, { x: '' });
+  fs.appendFileSync(log.file, event('pad', at, { x: 'y'.repeat(gap - Buffer.byteLength(pad)) }) + msg + filler.repeat(100));
+  fs.utimesSync(log.file, new Date(at), new Date(at));
+  assert.ok(fs.statSync(log.file).size > (128 + 768) * 1024, 'too big for the head + tail path to cover');
+  f.watcher.tick();
+  const session = f.watcher.sessions()[0];
+  assert.equal(session.prompt, prompt, 'the prompt across the chunk boundary is intact');
+  const turns = Object.values(session.days).reduce((n, d) => n + d.turns, 0);
+  assert.equal(turns, 291, 'every turn in the middle of the log is counted');
+});
+
+function event(type, at, extra = {}) {
+  return JSON.stringify({ timestamp: new Date(at).toISOString(), type: 'event_msg', payload: { type, ...extra } }) + '\n';
+}

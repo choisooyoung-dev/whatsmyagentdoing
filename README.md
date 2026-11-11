@@ -85,6 +85,8 @@ store and isn't supported yet; its `agy` CLI is.)
 --no-open         Don't open the browser
 --private         Hide prompts, replies and titles — status only (screen-share safe)
 --json            Print one snapshot as JSON and exit
+--report          Print a Markdown report of the last 7 days per project and exit
+--days <n>        Days the report covers, today included (default 7)
 --demo            Show a made-up team instead of your sessions (screenshots, trying it out)
 --stop            Stop a running dashboard (or say /myoffice stop)
 --update          git pull the latest version and restart (or say /myoffice update)
@@ -97,6 +99,19 @@ store and isn't supported yet; its `agy` CLI is.)
 Running it again while it's up just reopens the tab.
 
 **Updates:** the page shows its version in the corner and an **Update** button when a newer one is out (it checks the `package.json` on this repo's main branch about every half hour; set `WMAD_NO_UPDATE_CHECK=1` to turn that off). The button — or `--update`, or `/myoffice update` — runs `git pull` in the install folder and restarts the dashboard.
+
+## Daily report
+
+`--report` prints what your agents did over the last days, one table per day:
+
+```
+node bin/cli.js --report             # the last 7 days, today included
+node bin/cli.js --report --days 1    # today only
+node bin/cli.js --report --json      # the same data as JSON
+node bin/cli.js --report --private   # leave out session titles
+```
+
+Each project row shows active time, turns, tokens, sessions, agents and up to three session titles. **Active** counts the minutes in which a session logged events no more than five minutes apart; parallel sessions in the same project count each minute once. Turns and tokens are counted for the agents whose logs record them (Claude Code, Codex, Antigravity); the report reads each log touched in the period whole, so it can take a few seconds with large histories.
 
 ## How it works
 

@@ -52,18 +52,41 @@ function today(s, ts) {
   return s.daily.day === day ? s.daily : null;
 }
 
+// Per-day totals for --report: turns, tokens and the minutes the session was
+// active. Like today(), it only covers the part of the log that was read.
+const ACTIVE_GAP_MS = 5 * 60 * 1000;
+
+function dayOf(s, ts) {
+  const day = dayKey(ts);
+  s.days ||= Object.create(null);
+  return (s.days[day] ||= { turns: 0, tokens: 0, minutes: new Set() });
+}
+
+// Two events at most ACTIVE_GAP_MS apart mean the session was busy in between.
+function active(s, t) {
+  const prev = s._activeAt;
+  if (prev && t > prev && t - prev <= ACTIVE_GAP_MS) {
+    for (let m = Math.floor(prev / 60000); m <= Math.floor(t / 60000); m++) dayOf(s, m * 60000).minutes.add(m);
+  }
+  if (!prev || t > prev) s._activeAt = t;
+}
+
 function usage(s, ts, { context, window, tokens }) {
   if (Number.isFinite(context) && context > 0) {
     s.context = context;
     s.contextWindow = Number.isFinite(window) && window > 0 ? window : null;
   }
-  const d = Number.isFinite(tokens) && tokens > 0 && today(s, ts);
+  if (!(Number.isFinite(tokens) && tokens > 0) || !ts) return;
+  const d = today(s, ts);
   if (d) d.tokens += tokens;
+  dayOf(s, ts).tokens += tokens;
 }
 
 function countTurn(s, ts) {
+  if (!ts) return;
   const d = today(s, ts);
   if (d) d.turns += 1;
+  dayOf(s, ts).turns += 1;
 }
 
 function clean(text, max = 220) {
@@ -98,6 +121,7 @@ function stamp(s, ts) {
   if (Number.isFinite(t)) {
     s.lastEventAt = Math.max(s.lastEventAt || 0, t);
     if (!s.startedAt) s.startedAt = t;
+    active(s, t);
   }
   return Number.isFinite(t) ? t : null;
 }
